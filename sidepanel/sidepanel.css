@@ -295,6 +295,125 @@ body {
   gap: 10px;
 }
 
+.review-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #e8f5e9;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.review-batch-actions .select-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #388e3c;
+  font-weight: 500;
+}
+
+.review-batch-actions .select-all input {
+  margin: 0;
+}
+
+.batch-buttons {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.batch-btn {
+  padding: 5px 10px;
+  border: 1px solid #81c784;
+  background: #fff;
+  color: #388e3c;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.batch-btn:hover {
+  background: #c8e6c9;
+}
+
+.selected-count {
+  color: #666;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.review-group {
+  margin-bottom: 16px;
+}
+
+.review-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 0;
+  position: sticky;
+  top: 0;
+  background: #f5f5f5;
+  z-index: 1;
+}
+
+.review-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+}
+
+.review-group-count {
+  font-size: 11px;
+  color: #999;
+  background: #e0e0e0;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.review-group.overdue .review-group-title {
+  color: #c62828;
+}
+
+.review-group.overdue .review-group-count {
+  background: #ffcdd2;
+  color: #c62828;
+}
+
+.review-group.today .review-group-title {
+  color: #ef6c00;
+}
+
+.review-group.today .review-group-count {
+  background: #ffe0b2;
+  color: #ef6c00;
+}
+
+.review-group.later .review-group-title {
+  color: #2e7d32;
+}
+
+.review-group.later .review-group-count {
+  background: #c8e6c9;
+  color: #2e7d32;
+}
+
+.review-group .note-card {
+  position: relative;
+}
+
+.review-group .note-card .note-checkbox {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+}
+
 .courses-header {
   margin-bottom: 12px;
 }
@@ -637,4 +756,38 @@ body {
   border-radius: 3px;
   font-size: 10px;
   margin-left: 4px;
+}
+
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: #323232;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 10000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast.toast-warning {
+  background: #ff9800;
+}
+
+.toast.toast-error {
+  background: #f44336;
+}
+
+.toast.toast-success {
+  background: #4caf50;
 }

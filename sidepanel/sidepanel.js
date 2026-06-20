@@ -5,6 +5,7 @@ const SidePanelApp = {
     tags: [],
     currentTab: 'notes',
     currentCourseId: null,
+    selectedNoteIds: [],
     filters: {
       courseId: '',
       tag: '',
@@ -63,6 +64,18 @@ const SidePanelApp = {
     });
 
     document.getElementById('btn-export').addEventListener('click', () => this.exportNotes());
+
+    document.getElementById('select-all-notes').addEventListener('change', () => {
+      this.toggleSelectAllNotes();
+    });
+
+    document.getElementById('batch-mastered').addEventListener('click', () => {
+      this.batchMarkMastered();
+    });
+
+    document.getElementById('batch-postpone').addEventListener('click', () => {
+      this.batchPostpone(1);
+    });
   },
 
   async loadAllData() {
@@ -128,6 +141,15 @@ const SidePanelApp = {
         chrome.storage.local.remove('openTab');
       }
     });
+    
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && changes.openTab) {
+        if (changes.openTab.newValue) {
+          this.switchTab(changes.openTab.newValue);
+          chrome.storage.local.remove('openTab');
+        }
+      }
+    });
   },
 
   renderCourseFilters() {
@@ -184,6 +206,10 @@ const SidePanelApp = {
     notes.sort((a, b) => {
       if (f.sortBy === 'createdAt') {
         return f.sortOrder === 'asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt;
+      } else if (f.sortBy === 'reminder') {
+        const aTime = a.reviewReminder ? new Date(a.reviewReminder).getTime() : Infinity;
+        const bTime = b.reviewReminder ? new Date(b.reviewReminder).getTime() : Infinity;
+        return f.sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
       }
       return b.createdAt - a.createdAt;
     });
@@ -240,7 +266,7 @@ const SidePanelApp = {
     });
   },
 
-  createNoteCardHTML(note) {
+  createNoteCardHTML(note, options = {}) {
     const course = this.state.courses.find(c => c.id === note.courseId);
     const diffText = { easy: '简单', medium: '中等', hard: '困难' }[note.difficulty] || '';
     const dateStr = this.formatDate(note.createdAt);
@@ -264,8 +290,15 @@ const SidePanelApp = {
       reminderHTML = `<span class="note-reminder">⏰ ${reminderStr}</span>`;
     }
 
+    const checkboxHTML = options.showCheckbox ? `
+      <label class="note-checkbox" style="position: absolute; top: 10px; right: 10px; z-index: 2;">
+        <input type="checkbox" ${options.isSelected ? 'checked' : ''}>
+      </label>
+    ` : '';
+
     return `
-      <div class="note-card ${note.mastered ? 'mastered' : ''} ${note.isWrong ? 'wrong' : ''}" data-note-id="${note.id}">
+      <div class="note-card ${note.mastered ? 'mastered' : ''} ${note.isWrong ? 'wrong' : ''}" data-note-id="${note.id}" style="position: relative;">
+        ${checkboxHTML}
         <div class="note-text">${this.escapeHtml(note.text || note.comment || '无内容')}</div>
         ${note.comment && note.text ? `<div class="note-comment">${this.escapeHtml(note.comment)}</div>` : ''}
         ${tagsHTML}
@@ -288,9 +321,11 @@ const SidePanelApp = {
 
   renderReviewList() {
     const listEl = document.getElementById('review-list');
+    const batchActionsEl = document.getElementById('review-batch-actions');
     let notes = this.getFilteredNotes();
 
     if (notes.length === 0) {
+      batchActionsEl.style.display = 'none';
       listEl.innerHTML = `
         <div class="empty-state">
           <p>暂无待复习内容</p>
@@ -299,10 +334,51 @@ const SidePanelApp = {
       return;
     }
 
-    listEl.innerHTML = notes.map(note => this.createNoteCardHTML(note)).join('');
+    batchActionsEl.style.display = 'flex';
+    document.getElementById('selected-count').textContent = `已选 ${this.state.selectedNoteIds.length} 条`;
     
+    const allSelected = notes.every(n => this.state.selectedNoteIds.includes(n.id));
+    document.getElementById('select-all-notes').checked = allSelected;
+
+    const groups = this.groupNotesByReminder(notes);
+    const groupOrder = ['overdue', 'today', 'later', 'noReminder'];
+    const groupTitles = {
+      overdue: '已过期',
+      today: '今天',
+      later: '以后',
+      noReminder: '未设置提醒'
+    };
+
+    let html = '';
+    groupOrder.forEach(groupKey => {
+      const groupNotes = groups[groupKey] || [];
+      if (groupNotes.length === 0) return;
+      
+      html += `
+        <div class="review-group ${groupKey}">
+          <div class="review-group-header">
+            <span class="review-group-title">${groupTitles[groupKey]}</span>
+            <span class="review-group-count">${groupNotes.length} 条</span>
+          </div>
+          <div class="review-group-notes">
+            ${groupNotes.map(note => this.createNoteCardHTML(note, { showCheckbox: true, isSelected: this.state.selectedNoteIds.includes(note.id) })).join('')}
+          </div>
+        </div>
+      `;
+    });
+
+    listEl.innerHTML = html;
+
     listEl.querySelectorAll('.note-card').forEach(card => {
       const noteId = card.dataset.noteId;
+      
+      const checkbox = card.querySelector('.note-checkbox input');
+      if (checkbox) {
+        checkbox.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleNoteSelection(noteId);
+        });
+      }
       
       card.querySelector('.action-btn.edit')?.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -323,7 +399,115 @@ const SidePanelApp = {
         e.stopPropagation();
         this.toggleWrong(noteId);
       });
+      
+      card.addEventListener('click', () => {
+        this.openNotePage(noteId);
+      });
     });
+  },
+
+  groupNotesByReminder(notes) {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    
+    const groups = {
+      overdue: [],
+      today: [],
+      later: [],
+      noReminder: []
+    };
+
+    notes.forEach(note => {
+      if (!note.reviewReminder) {
+        groups.noReminder.push(note);
+        return;
+      }
+      
+      const reminderDate = new Date(note.reviewReminder);
+      if (reminderDate < todayStart) {
+        groups.overdue.push(note);
+      } else if (reminderDate < todayEnd) {
+        groups.today.push(note);
+      } else {
+        groups.later.push(note);
+      }
+    });
+
+    const sortByReminder = (a, b) => {
+      const aTime = a.reviewReminder ? new Date(a.reviewReminder).getTime() : Infinity;
+      const bTime = b.reviewReminder ? new Date(b.reviewReminder).getTime() : Infinity;
+      return aTime - bTime;
+    };
+
+    groups.overdue.sort(sortByReminder);
+    groups.today.sort(sortByReminder);
+    groups.later.sort(sortByReminder);
+
+    return groups;
+  },
+
+  toggleNoteSelection(noteId) {
+    const index = this.state.selectedNoteIds.indexOf(noteId);
+    if (index === -1) {
+      this.state.selectedNoteIds.push(noteId);
+    } else {
+      this.state.selectedNoteIds.splice(index, 1);
+    }
+    this.renderReviewList();
+  },
+
+  toggleSelectAllNotes() {
+    const notes = this.getFilteredNotes();
+    const allSelected = notes.every(n => this.state.selectedNoteIds.includes(n.id));
+    
+    if (allSelected) {
+      this.state.selectedNoteIds = [];
+    } else {
+      this.state.selectedNoteIds = notes.map(n => n.id);
+    }
+    this.renderReviewList();
+  },
+
+  async batchMarkMastered() {
+    if (this.state.selectedNoteIds.length === 0) return;
+    
+    const count = this.state.selectedNoteIds.length;
+    const ids = [...this.state.selectedNoteIds];
+    
+    for (const noteId of ids) {
+      this.toggleMastered(noteId, true);
+    }
+    
+    this.state.selectedNoteIds = [];
+    this.showToast(`已将 ${count} 条标记为已掌握`, 'success');
+    this.loadAllData();
+  },
+
+  async batchPostpone(days = 1) {
+    if (this.state.selectedNoteIds.length === 0) return;
+    
+    const count = this.state.selectedNoteIds.length;
+    const ids = [...this.state.selectedNoteIds];
+    
+    for (const noteId of ids) {
+      const note = this.state.notes.find(n => n.id === noteId);
+      if (note) {
+        let newTime;
+        if (note.reviewReminder) {
+          newTime = new Date(note.reviewReminder);
+          newTime.setDate(newTime.getDate() + days);
+        } else {
+          newTime = new Date();
+          newTime.setDate(newTime.getDate() + days);
+          newTime.setHours(20, 0, 0, 0);
+        }
+        this.setReviewReminder(noteId, newTime.getTime());
+      }
+    }
+    
+    this.showToast(`已将 ${count} 条提醒顺延 ${days} 天`, 'success');
+    this.loadAllData();
   },
 
   renderCourses() {
@@ -535,6 +719,14 @@ const SidePanelApp = {
     });
   },
 
+  setReviewReminder(noteId, reminderTime) {
+    chrome.runtime.sendMessage({
+      action: 'setReviewReminder',
+      noteId,
+      reminderTime
+    });
+  },
+
   editNote(noteId) {
     const note = this.state.notes.find(n => n.id === noteId);
     if (note) {
@@ -552,13 +744,14 @@ const SidePanelApp = {
     }
   },
 
-  toggleMastered(noteId) {
+  toggleMastered(noteId, forceValue) {
     const note = this.state.notes.find(n => n.id === noteId);
     if (note) {
+      const newValue = typeof forceValue === 'boolean' ? forceValue : !note.mastered;
       chrome.runtime.sendMessage({ 
         action: 'updateNoteMastery', 
         noteId, 
-        mastered: !note.mastered 
+        mastered: newValue 
       }, (response) => {
         if (response && response.success) {
           this.loadAllData();
@@ -584,9 +777,75 @@ const SidePanelApp = {
 
   openNotePage(noteId) {
     const note = this.state.notes.find(n => n.id === noteId);
-    if (note && note.url) {
-      chrome.tabs.create({ url: note.url });
+    if (!note || !note.url) return;
+    
+    chrome.tabs.query({ url: note.url }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        const tab = tabs[0];
+        chrome.tabs.update(tab.id, { active: true });
+        chrome.windows.update(tab.windowId, { focused: true });
+        
+        chrome.tabs.sendMessage(tab.id, { 
+          action: 'flashHighlight', 
+          noteId: noteId 
+        }, (response) => {
+          if (chrome.runtime.lastError || !response || !response.success) {
+            setTimeout(() => {
+              chrome.tabs.sendMessage(tab.id, { 
+                action: 'flashHighlight', 
+                noteId: noteId 
+              }, (resp2) => {
+                if (chrome.runtime.lastError || !resp2 || !resp2.success) {
+                  this.showToast('无法定位到高亮位置，页面可能已变化', 'warning');
+                }
+              });
+            }, 500);
+          }
+        });
+      } else {
+        chrome.tabs.create({ url: note.url }, (newTab) => {
+          const tabId = newTab.id;
+          let attempts = 0;
+          const maxAttempts = 20;
+          
+          const checkAndFlash = () => {
+            attempts++;
+            if (attempts > maxAttempts) {
+              this.showToast('页面加载完成，但未找到对应的高亮位置', 'warning');
+              return;
+            }
+            
+            chrome.tabs.sendMessage(tabId, { 
+              action: 'flashHighlight', 
+              noteId: noteId 
+            }, (response) => {
+              if (chrome.runtime.lastError || !response || !response.success) {
+                setTimeout(checkAndFlash, 500);
+              }
+            });
+          };
+          
+          setTimeout(checkAndFlash, 1000);
+        });
+      }
+    });
+  },
+
+  showToast(message, type = 'info') {
+    let toast = document.getElementById('toast-notification');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'toast-notification';
+      document.body.appendChild(toast);
     }
+    
+    toast.textContent = message;
+    toast.className = 'toast toast-' + type;
+    toast.classList.add('visible');
+    
+    setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 3000);
   },
 
   exportNotes() {

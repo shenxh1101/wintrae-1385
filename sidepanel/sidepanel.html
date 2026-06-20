@@ -51,9 +51,21 @@
             <option value="wrong">错题本</option>
           </select>
           <select id="filter-sort">
+            <option value="reminder-asc">提醒优先</option>
             <option value="createdAt-desc">最新创建</option>
             <option value="createdAt-asc">最早创建</option>
           </select>
+        </div>
+        <div class="review-batch-actions" id="review-batch-actions" style="display: none;">
+          <label class="select-all">
+            <input type="checkbox" id="select-all-notes">
+            <span>全选</span>
+          </label>
+          <div class="batch-buttons">
+            <button class="batch-btn" id="batch-mastered">标记掌握</button>
+            <button class="batch-btn" id="batch-postpone">顺延1天</button>
+          </div>
+          <span class="selected-count" id="selected-count">已选 0 条</span>
         </div>
         <div class="review-list" id="review-list">
           <div class="empty-state">

@@ -102,6 +102,17 @@ async function handleSaveNote(noteData, sender, sendResponse) {
     }
     const note = await Storage.saveNote(noteData);
     sendResponse({ success: true, note });
+    
+    if (note.url) {
+      chrome.tabs.query({ url: note.url }, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'updateHighlight',
+            note: note
+          }).catch(() => {});
+        });
+      });
+    }
   } catch (error) {
     sendResponse({ success: false, error: error.message });
   }
@@ -128,8 +139,23 @@ async function handleGetAllNotes(sendResponse) {
 
 async function handleDeleteNote(noteId, sendResponse) {
   try {
+    const notes = await Storage.getAllNotes();
+    const note = notes.find(n => n.id === noteId);
+    const noteUrl = note ? note.url : null;
+    
     await Storage.deleteNote(noteId);
     sendResponse({ success: true });
+    
+    if (noteUrl) {
+      chrome.tabs.query({ url: noteUrl }, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'removeHighlight',
+            noteId: noteId
+          }).catch(() => {});
+        });
+      });
+    }
   } catch (error) {
     sendResponse({ success: false, error: error.message });
   }

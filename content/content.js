@@ -13,6 +13,7 @@
     createTooltip();
     createQuickAddModal();
     setupEventListeners();
+    setupMessageListeners();
     
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
       loadPageNotes();
@@ -95,15 +96,40 @@
         hideTooltip();
       }
     });
+  }
 
+  function setupMessageListeners() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === 'addNoteFromSelection') {
-        if (message.text) {
-          currentSelection = message.text;
-        }
-        openQuickAddModal();
-      } else if (message.action === 'highlightSelection') {
-        highlightSelectedText(selectedColor);
+      switch (message.action) {
+        case 'addNoteFromSelection':
+          if (message.text) {
+            currentSelection = message.text;
+          }
+          openQuickAddModal();
+          break;
+        case 'highlightSelection':
+          highlightSelectedText(selectedColor);
+          break;
+        case 'flashHighlight':
+          const flashSuccess = flashHighlight(message.noteId);
+          sendResponse({ success: flashSuccess });
+          break;
+        case 'updateHighlight':
+          updateHighlight(message.note);
+          sendResponse({ success: true });
+          break;
+        case 'removeHighlight':
+          removeHighlight(message.noteId);
+          sendResponse({ success: true });
+          break;
+        case 'getAllHighlights':
+          const highlights = getAllHighlightIds();
+          sendResponse({ success: true, highlights });
+          break;
+        case 'scrollToNote':
+          const result = scrollToNote(message.noteId);
+          sendResponse({ success: result });
+          break;
       }
     });
   }
@@ -225,6 +251,7 @@
     const tags = tagsStr ? tagsStr.split(/[,，]/).map(t => t.trim()).filter(t => t) : [];
     
     const videoTime = getVideoTime();
+    const position = currentRange ? getSelectionPosition(currentRange, currentSelection) : null;
     
     const noteData = {
       text: currentSelection || '',
@@ -235,6 +262,7 @@
       pageTitle: document.title,
       url: window.location.href,
       timestamp: videoTime,
+      position: position,
       createdAt: Date.now()
     };
     
@@ -243,11 +271,13 @@
       note: noteData
     }, response => {
       if (response && response.success) {
+        const savedNote = response.note;
+        
         if (currentRange) {
           try {
             const span = document.createElement('span');
             span.className = 'note-highlight ' + selectedColor;
-            span.dataset.noteId = response.note.id;
+            span.dataset.noteId = savedNote.id;
             span.dataset.text = currentSelection;
             span.title = comment || '点击查看笔记';
             currentRange.surroundContents(span);
@@ -256,11 +286,139 @@
           }
         }
         
-        pageNotes.push(response.note);
+        pageNotes.push(savedNote);
         closeQuickAddModal();
         window.getSelection().removeAllRanges();
       }
     });
+  }
+
+  function getSelectionPosition(range, text) {
+    const startContainer = range.startContainer;
+    const endContainer = range.endContainer;
+    
+    const startXPath = getXPath(startContainer);
+    const endXPath = getXPath(endContainer);
+    
+    const beforeText = getTextBeforePosition(startContainer, range.startOffset);
+    const afterText = getTextAfterPosition(endContainer, range.endOffset);
+    
+    const occurrenceIndex = getOccurrenceIndex(text, range);
+    
+    return {
+      startXPath: startXPath,
+      endXPath: endXPath,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
+      occurrenceIndex: occurrenceIndex,
+      beforeContext: beforeText.slice(-30),
+      afterContext: afterText.slice(0, 30),
+      textLength: text.length
+    };
+  }
+
+  function getXPath(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return getXPath(node.parentNode) + '/text()[' + getTextNodeIndex(node) + ']';
+    }
+    
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    
+    if (node.id) {
+      return '//*[@id="' + node.id + '"]';
+    }
+    
+    let path = '';
+    let current = node;
+    
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      let count = 0;
+      let sibling = current.previousSibling;
+      
+      while (sibling) {
+        if (sibling.nodeType === Node.ELEMENT_NODE && sibling.tagName === current.tagName) {
+          count++;
+        }
+        sibling = sibling.previousSibling;
+      }
+      
+      const tagName = current.tagName.toLowerCase();
+      path = '/' + tagName + '[' + (count + 1) + ']' + path;
+      
+      if (current === document.body) break;
+      current = current.parentNode;
+    }
+    
+    return path;
+  }
+
+  function getTextNodeIndex(textNode) {
+    let index = 1;
+    let sibling = textNode.previousSibling;
+    while (sibling) {
+      if (sibling.nodeType === Node.TEXT_NODE) {
+        index++;
+      }
+      sibling = sibling.previousSibling;
+    }
+    return index;
+  }
+
+  function getTextBeforePosition(container, offset) {
+    if (container.nodeType === Node.TEXT_NODE) {
+      return container.nodeValue.substring(0, offset);
+    }
+    return '';
+  }
+
+  function getTextAfterPosition(container, offset) {
+    if (container.nodeType === Node.TEXT_NODE) {
+      return container.nodeValue.substring(offset);
+    }
+    return '';
+  }
+
+  function getOccurrenceIndex(searchText, range) {
+    const rangeText = range.toString();
+    if (!rangeText) return 0;
+    
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function(node) {
+          if (!node.nodeValue || node.nodeValue.trim().length === 0) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (node.parentElement.closest('.note-highlight, script, style, noscript')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    
+    let count = 0;
+    let found = false;
+    let node;
+    
+    while (node = walker.nextNode()) {
+      const text = node.nodeValue;
+      let startIndex = 0;
+      
+      while ((startIndex = text.indexOf(searchText, startIndex)) !== -1) {
+        if (node === range.startContainer && startIndex === range.startOffset) {
+          found = true;
+          break;
+        }
+        count++;
+        startIndex += searchText.length;
+      }
+      
+      if (found) break;
+    }
+    
+    return count;
   }
 
   function getVideoTime() {
@@ -311,14 +469,15 @@
     let left = rect.left + window.scrollX;
     let top = rect.bottom + window.scrollY + 8;
     
-    const tooltipRect = tooltip.getBoundingClientRect();
-    if (left + tooltipRect.width > window.innerWidth + window.scrollX) {
-      left = window.innerWidth + window.scrollX - tooltipRect.width - 10;
-    }
-    
     tooltip.style.left = left + 'px';
     tooltip.style.top = top + 'px';
     tooltip.classList.add('visible');
+    
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (left + tooltipRect.width > window.innerWidth + window.scrollX) {
+      left = window.innerWidth + window.scrollX - tooltipRect.width - 10;
+      tooltip.style.left = left + 'px';
+    }
   }
 
   function hideTooltip() {
@@ -335,7 +494,7 @@
         pageNotes = response.notes;
         setTimeout(() => {
           restoreHighlights();
-        }, 500);
+        }, 300);
       }
     });
   }
@@ -349,7 +508,7 @@
     
     textNotes.forEach(note => {
       try {
-        highlightTextInDocument(note.text, note);
+        restoreSingleHighlight(note);
       } catch (e) {
         console.warn('恢复高亮失败:', note.text, e);
       }
@@ -358,8 +517,86 @@
     isRestoring = false;
   }
 
-  function highlightTextInDocument(searchText, note) {
+  function restoreSingleHighlight(note) {
+    const searchText = note.text;
     if (!searchText || searchText.length < 2) return false;
+    
+    if (note.position) {
+      const result = restoreByPosition(note);
+      if (result) return true;
+    }
+    
+    return restoreByTextSearch(note);
+  }
+
+  function restoreByPosition(note) {
+    const pos = note.position;
+    if (!pos) return false;
+    
+    try {
+      const startNode = getElementByXPath(pos.startXPath);
+      const endNode = getElementByXPath(pos.endXPath);
+      
+      if (startNode && endNode) {
+        const actualStartOffset = findOffsetByContext(startNode, pos, 'before');
+        const actualEndOffset = findOffsetByContext(endNode, pos, 'after');
+        
+        if (actualStartOffset !== -1 && actualEndOffset !== -1) {
+          const range = document.createRange();
+          range.setStart(startNode, actualStartOffset);
+          range.setEnd(endNode, actualEndOffset);
+          
+          const span = document.createElement('span');
+          span.className = 'note-highlight ' + (note.color || 'yellow');
+          span.dataset.noteId = note.id;
+          span.dataset.text = searchText;
+          span.title = note.comment || '点击查看笔记';
+          
+          range.surroundContents(span);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('按位置恢复失败，尝试文字匹配:', e);
+    }
+    
+    return false;
+  }
+
+  function getElementByXPath(xpath) {
+    try {
+      const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      return result.singleNodeValue;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function findOffsetByContext(node, pos, direction) {
+    if (node.nodeType !== Node.TEXT_NODE) return -1;
+    
+    const text = node.nodeValue;
+    const targetOffset = direction === 'before' ? pos.startOffset : pos.endOffset;
+    const context = direction === 'before' ? pos.beforeContext : pos.afterContext;
+    
+    if (text.length > targetOffset && text[targetOffset] !== undefined) {
+      const contextStart = direction === 'before' ? targetOffset - (context?.length || 0) : targetOffset;
+      const contextEnd = direction === 'before' ? targetOffset : targetOffset + (context?.length || 0);
+      const actualContext = text.substring(Math.max(0, contextStart), Math.min(text.length, contextEnd));
+      
+      if (actualContext === context || actualContext.length > 0 && context?.includes(actualContext)) {
+        return targetOffset;
+      }
+    }
+    
+    return -1;
+  }
+
+  function restoreByTextSearch(note) {
+    const searchText = note.text;
+    if (!searchText || searchText.length < 2) return false;
+    
+    const targetIndex = note.position?.occurrenceIndex || 0;
     
     const walker = document.createTreeWalker(
       document.body,
@@ -383,36 +620,44 @@
       textNodes.push(node);
     }
     
+    let occurrenceCount = 0;
+    
     for (const textNode of textNodes) {
       const text = textNode.nodeValue;
-      const index = text.indexOf(searchText);
+      let startIndex = 0;
       
-      if (index !== -1) {
-        try {
-          const range = document.createRange();
-          range.setStart(textNode, index);
-          range.setEnd(textNode, index + searchText.length);
-          
-          const span = document.createElement('span');
-          span.className = 'note-highlight ' + (note.color || 'yellow');
-          span.dataset.noteId = note.id;
-          span.dataset.text = searchText;
-          span.title = note.comment || '点击查看笔记';
-          
-          range.surroundContents(span);
-          return true;
-        } catch (e) {
-          console.warn('包裹文本失败:', e);
+      while ((startIndex = text.indexOf(searchText, startIndex)) !== -1) {
+        if (occurrenceCount === targetIndex) {
+          try {
+            const range = document.createRange();
+            range.setStart(textNode, startIndex);
+            range.setEnd(textNode, startIndex + searchText.length);
+            
+            const span = document.createElement('span');
+            span.className = 'note-highlight ' + (note.color || 'yellow');
+            span.dataset.noteId = note.id;
+            span.dataset.text = searchText;
+            span.title = note.comment || '点击查看笔记';
+            
+            range.surroundContents(span);
+            return true;
+          } catch (e) {
+            console.warn('包裹文本失败:', e);
+          }
         }
+        occurrenceCount++;
+        startIndex += searchText.length;
       }
     }
     
-    return findAndHighlightAcrossNodes(searchText, note, textNodes);
+    return findAndHighlightAcrossNodes(searchText, note, textNodes, targetIndex - occurrenceCount);
   }
 
-  function findAndHighlightAcrossNodes(searchText, note, textNodes) {
+  function findAndHighlightAcrossNodes(searchText, note, textNodes, skipCount) {
     const searchChars = searchText.replace(/\s+/g, '');
     if (searchChars.length < 3) return false;
+    
+    let matchCount = 0;
     
     for (let i = 0; i < textNodes.length; i++) {
       const combinedText = [];
@@ -427,83 +672,145 @@
       }
       
       const fullText = combinedText.join('');
-      const matchIndex = fullText.indexOf(searchChars);
+      let matchIndex = -1;
+      let searchFrom = 0;
       
-      if (matchIndex !== -1 && nodesToWrap.length > 1) {
-        let remainingChars = matchIndex;
-        let startNode = null;
-        let startOffset = 0;
-        
-        for (const node of nodesToWrap) {
-          const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
-          if (remainingChars < nodeLen) {
-            startNode = node;
-            const originalText = node.nodeValue;
-            let nonSpaceCount = 0;
-            let offset = 0;
-            for (let k = 0; k < originalText.length; k++) {
-              if (originalText[k] !== ' ' && originalText[k] !== '\n' && originalText[k] !== '\t') {
-                if (nonSpaceCount >= remainingChars) {
-                  offset = k;
-                  break;
-                }
-                nonSpaceCount++;
-              }
+      while ((matchIndex = fullText.indexOf(searchChars, searchFrom)) !== -1) {
+        if (matchCount === skipCount || skipCount < 0) {
+          let remainingChars = matchIndex;
+          let startNode = null;
+          let startOffset = 0;
+          
+          for (const node of nodesToWrap) {
+            const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
+            if (remainingChars < nodeLen) {
+              startNode = node;
+              startOffset = findOffsetInNode(node, remainingChars);
+              break;
             }
-            startOffset = offset;
-            break;
+            remainingChars -= nodeLen;
           }
-          remainingChars -= nodeLen;
-        }
-        
-        let endRemaining = matchIndex + searchChars.length;
-        let endNode = null;
-        let endOffset = 0;
-        
-        for (const node of nodesToWrap) {
-          const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
-          if (endRemaining <= nodeLen) {
-            endNode = node;
-            const originalText = node.nodeValue;
-            let nonSpaceCount = 0;
-            let offset = 0;
-            for (let k = 0; k < originalText.length; k++) {
-              if (originalText[k] !== ' ' && originalText[k] !== '\n' && originalText[k] !== '\t') {
-                nonSpaceCount++;
-                if (nonSpaceCount >= endRemaining) {
-                  offset = k + 1;
-                  break;
-                }
-              }
+          
+          let endRemaining = matchIndex + searchChars.length;
+          let endNode = null;
+          let endOffset = 0;
+          
+          for (const node of nodesToWrap) {
+            const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
+            if (endRemaining <= nodeLen) {
+              endNode = node;
+              endOffset = findOffsetInNode(node, endRemaining);
+              break;
             }
-            endOffset = offset;
-            break;
+            endRemaining -= nodeLen;
           }
-          endRemaining -= nodeLen;
-        }
-        
-        if (startNode && endNode) {
-          try {
-            const range = document.createRange();
-            range.setStart(startNode, startOffset);
-            range.setEnd(endNode, endOffset);
-            
-            const span = document.createElement('span');
-            span.className = 'note-highlight ' + (note.color || 'yellow');
-            span.dataset.noteId = note.id;
-            span.dataset.text = searchText;
-            span.title = note.comment || '点击查看笔记';
-            
-            range.surroundContents(span);
-            return true;
-          } catch (e) {
-            continue;
+          
+          if (startNode && endNode) {
+            try {
+              const range = document.createRange();
+              range.setStart(startNode, startOffset);
+              range.setEnd(endNode, endOffset);
+              
+              const span = document.createElement('span');
+              span.className = 'note-highlight ' + (note.color || 'yellow');
+              span.dataset.noteId = note.id;
+              span.dataset.text = searchText;
+              span.title = note.comment || '点击查看笔记';
+              
+              range.surroundContents(span);
+              return true;
+            } catch (e) {
+              break;
+            }
           }
         }
+        matchCount++;
+        searchFrom = matchIndex + 1;
       }
     }
     
     return false;
+  }
+
+  function findOffsetInNode(node, charCount) {
+    const text = node.nodeValue;
+    let nonSpaceCount = 0;
+    
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (char !== ' ' && char !== '\n' && char !== '\t' && char !== '\r') {
+        nonSpaceCount++;
+        if (nonSpaceCount > charCount) {
+          return i;
+        }
+      }
+    }
+    
+    return text.length;
+  }
+
+  function flashHighlight(noteId) {
+    const highlight = document.querySelector(`.note-highlight[data-note-id="${noteId}"]`);
+    if (!highlight) return false;
+    
+    highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    
+    let flashCount = 0;
+    const flashInterval = setInterval(() => {
+      highlight.style.boxShadow = flashCount % 2 === 0 ? '0 0 10px 3px #ff9800' : 'none';
+      flashCount++;
+      
+      if (flashCount >= 6) {
+        clearInterval(flashInterval);
+        highlight.style.boxShadow = 'none';
+      }
+    }, 200);
+    
+    return true;
+  }
+
+  function scrollToNote(noteId) {
+    const highlight = document.querySelector(`.note-highlight[data-note-id="${noteId}"]`);
+    if (!highlight) return false;
+    
+    highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+  }
+
+  function updateHighlight(note) {
+    const highlight = document.querySelector(`.note-highlight[data-note-id="${note.id}"]`);
+    if (!highlight) return;
+    
+    if (note.color) {
+      highlight.className = 'note-highlight ' + note.color;
+    }
+    if (note.comment !== undefined) {
+      highlight.title = note.comment || '点击查看笔记';
+    }
+    
+    const noteIndex = pageNotes.findIndex(n => n.id === note.id);
+    if (noteIndex !== -1) {
+      pageNotes[noteIndex] = { ...pageNotes[noteIndex], ...note };
+    }
+  }
+
+  function removeHighlight(noteId) {
+    const highlight = document.querySelector(`.note-highlight[data-note-id="${noteId}"]`);
+    if (!highlight) return;
+    
+    const parent = highlight.parentNode;
+    while (highlight.firstChild) {
+      parent.insertBefore(highlight.firstChild, highlight);
+    }
+    parent.removeChild(highlight);
+    parent.normalize();
+    
+    pageNotes = pageNotes.filter(n => n.id !== noteId);
+  }
+
+  function getAllHighlightIds() {
+    const highlights = document.querySelectorAll('.note-highlight[data-note-id]');
+    return Array.from(highlights).map(h => h.dataset.noteId);
   }
 
   function escapeHtml(text) {
