@@ -279,6 +279,166 @@ body {
   margin-bottom: 12px;
 }
 
+.review-view-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  background: #e8f5e9;
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.view-toggle-btn {
+  flex: 1;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.view-toggle-btn.active {
+  background: #fff;
+  color: #2e7d32;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.view-toggle-btn:hover:not(.active) {
+  color: #388e3c;
+}
+
+.review-plan {
+  margin-bottom: 12px;
+}
+
+.plan-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.plan-day:hover {
+  border-color: #81c784;
+  box-shadow: 0 1px 4px rgba(76, 175, 80, 0.15);
+}
+
+.plan-day.selected {
+  border-color: #4caf50;
+  background: #f1f8e9;
+}
+
+.plan-day.overdue {
+  border-left: 3px solid #ef5350;
+}
+
+.plan-day.today {
+  border-left: 3px solid #ff9800;
+}
+
+.plan-day.future {
+  border-left: 3px solid #66bb6a;
+}
+
+.plan-day-label {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 50px;
+}
+
+.plan-day.overdue .plan-day-label {
+  color: #c62828;
+}
+
+.plan-day.today .plan-day-label {
+  color: #ef6c00;
+}
+
+.plan-day.future .plan-day-label {
+  color: #2e7d32;
+}
+
+.plan-day-date {
+  font-size: 10px;
+  color: #999;
+  min-width: 40px;
+}
+
+.plan-day-count {
+  margin-left: auto;
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.plan-day.overdue .plan-day-count {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.plan-day.today .plan-day-count {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.note-review-badge {
+  display: inline-block;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.note-review-badge.hot {
+  background: #fce4ec;
+  color: #c62828;
+}
+
+.wrong-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #ef9a9a;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.wrong-review-header .wrong-icon {
+  font-size: 18px;
+}
+
+.wrong-review-header .wrong-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c62828;
+}
+
+.wrong-review-header .wrong-count {
+  margin-left: auto;
+  background: #ffebee;
+  color: #c62828;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
 .review-filters select {
   flex: 1;
   min-width: 80px;

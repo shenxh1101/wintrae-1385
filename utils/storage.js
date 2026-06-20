@@ -35,6 +35,8 @@ const Storage = {
       note.mastered = false;
       note.isWrong = false;
       note.reviewReminder = null;
+      note.reviewCount = 0;
+      note.lastReviewTime = null;
       notes.push(note);
     }
     await this.set(this.KEYS.NOTES, notes);
@@ -173,6 +175,10 @@ const Storage = {
     if (note) {
       note.mastered = mastered;
       note.updatedAt = Date.now();
+      if (mastered) {
+        note.reviewCount = (note.reviewCount || 0) + 1;
+        note.lastReviewTime = Date.now();
+      }
       await this.set(this.KEYS.NOTES, notes);
     }
     return note;

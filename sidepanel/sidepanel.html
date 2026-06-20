@@ -37,6 +37,11 @@
       </section>
 
       <section class="tab-content" id="tab-review">
+        <div class="review-view-toggle">
+          <button class="view-toggle-btn active" data-view="plan">记忆计划</button>
+          <button class="view-toggle-btn" data-view="list">列表视图</button>
+          <button class="view-toggle-btn" data-view="wrong">错题复习</button>
+        </div>
         <div class="review-filters">
           <select id="filter-course">
             <option value="">全部课程</option>
@@ -56,6 +61,7 @@
             <option value="createdAt-asc">最早创建</option>
           </select>
         </div>
+        <div class="review-plan" id="review-plan"></div>
         <div class="review-batch-actions" id="review-batch-actions" style="display: none;">
           <label class="select-all">
             <input type="checkbox" id="select-all-notes">
@@ -67,11 +73,7 @@
           </div>
           <span class="selected-count" id="selected-count">已选 0 条</span>
         </div>
-        <div class="review-list" id="review-list">
-          <div class="empty-state">
-            <p>暂无待复习内容</p>
-          </div>
-        </div>
+        <div class="review-list" id="review-list"></div>
       </section>
 
       <section class="tab-content" id="tab-courses">
@@ -105,6 +107,10 @@
                 <label class="format-option">
                   <input type="radio" name="export-format" value="print">
                   <span>打印版</span>
+                </label>
+                <label class="format-option">
+                  <input type="radio" name="export-format" value="report">
+                  <span>复习报告</span>
                 </label>
               </div>
             </div>
