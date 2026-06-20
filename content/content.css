@@ -116,6 +116,29 @@
   display: block;
 }
 
+#note-tooltip .tooltip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#note-tooltip .tooltip-text {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  opacity: 0.9;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#note-tooltip .tooltip-comment {
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
 #note-tooltip .tooltip-tags {
   margin-top: 6px;
   display: flex;

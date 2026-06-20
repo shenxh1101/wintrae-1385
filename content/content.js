@@ -6,13 +6,19 @@
   let selectedColor = 'yellow';
   let selectedDifficulty = 'medium';
   let pageNotes = [];
+  let isRestoring = false;
 
   function init() {
     createToolbar();
     createTooltip();
     createQuickAddModal();
-    loadPageNotes();
     setupEventListeners();
+    
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      loadPageNotes();
+    } else {
+      window.addEventListener('load', loadPageNotes);
+    }
   }
 
   function createToolbar() {
@@ -82,8 +88,9 @@
     document.getElementById('note-modal-overlay').addEventListener('click', closeQuickAddModal);
 
     document.addEventListener('click', function(e) {
-      if (e.target.classList.contains('note-highlight')) {
-        showNoteTooltip(e.target);
+      const highlight = e.target.closest('.note-highlight');
+      if (highlight) {
+        showNoteTooltip(highlight);
       } else {
         hideTooltip();
       }
@@ -91,6 +98,9 @@
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'addNoteFromSelection') {
+        if (message.text) {
+          currentSelection = message.text;
+        }
         openQuickAddModal();
       } else if (message.action === 'highlightSelection') {
         highlightSelectedText(selectedColor);
@@ -99,12 +109,14 @@
   }
 
   function handleTextSelection(e) {
+    if (isRestoring) return;
+    
     const selection = window.getSelection();
     
     if (selection.rangeCount > 0 && selection.toString().trim().length > 0) {
       const range = selection.getRangeAt(0);
       
-      if (isInsideToolbar(e.target) || isInsideModal(e.target)) {
+      if (isInsideToolbar(e.target) || isInsideModal(e.target) || isInsideTooltip(e.target)) {
         return;
       }
       
@@ -114,38 +126,45 @@
       const rect = range.getBoundingClientRect();
       showToolbar(rect.left + window.scrollX, rect.top + window.scrollY - 45);
     } else {
-      if (!isInsideToolbar(e.target) && !isInsideModal(e.target)) {
+      if (!isInsideToolbar(e.target) && !isInsideModal(e.target) && !isInsideTooltip(e.target)) {
         hideToolbar();
       }
     }
   }
 
   function handleMouseDown(e) {
-    if (!isInsideToolbar(e.target) && !isInsideModal(e.target)) {
+    if (!isInsideToolbar(e.target) && !isInsideModal(e.target) && !isInsideTooltip(e.target)) {
       hideTooltip();
     }
   }
 
   function isInsideToolbar(element) {
     const toolbar = document.getElementById('note-toolbar');
-    return toolbar.contains(element);
+    return toolbar && toolbar.contains(element);
   }
 
   function isInsideModal(element) {
     const modal = document.getElementById('note-quick-add-modal');
     const overlay = document.getElementById('note-modal-overlay');
-    return modal.contains(element) || overlay.contains(element);
+    return (modal && modal.contains(element)) || (overlay && overlay.contains(element));
+  }
+
+  function isInsideTooltip(element) {
+    const tooltip = document.getElementById('note-tooltip');
+    return tooltip && tooltip.contains(element);
   }
 
   function showToolbar(x, y) {
     const toolbar = document.getElementById('note-toolbar');
+    if (!toolbar) return;
     toolbar.style.left = x + 'px';
     toolbar.style.top = y + 'px';
     toolbar.classList.add('visible');
   }
 
   function hideToolbar() {
-    document.getElementById('note-toolbar').classList.remove('visible');
+    const toolbar = document.getElementById('note-toolbar');
+    if (toolbar) toolbar.classList.remove('visible');
   }
 
   function handleToolbarClick(e) {
@@ -216,7 +235,6 @@
       pageTitle: document.title,
       url: window.location.href,
       timestamp: videoTime,
-      selectionHtml: currentRange ? currentRange.toString() : '',
       createdAt: Date.now()
     };
     
@@ -264,12 +282,20 @@
     const note = pageNotes.find(n => n.id === noteId);
     if (!note) return;
     
-    let html = `<div><strong>笔记:</strong> ${note.comment || '无备注'}</div>`;
+    let html = `<div class="tooltip-title"><strong>笔记</strong></div>`;
+    
+    if (note.text) {
+      html += `<div class="tooltip-text">${escapeHtml(note.text)}</div>`;
+    }
+    
+    if (note.comment) {
+      html += `<div class="tooltip-comment">${escapeHtml(note.comment)}</div>`;
+    }
     
     if (note.tags && note.tags.length > 0) {
       html += '<div class="tooltip-tags">';
       note.tags.forEach(tag => {
-        html += `<span class="tooltip-tag">${tag}</span>`;
+        html += `<span class="tooltip-tag">${escapeHtml(tag)}</span>`;
       });
       html += '</div>';
     }
@@ -282,13 +308,22 @@
     tooltip.innerHTML = html;
     
     const rect = element.getBoundingClientRect();
-    tooltip.style.left = rect.left + window.scrollX + 'px';
-    tooltip.style.top = rect.bottom + window.scrollY + 8 + 'px';
+    let left = rect.left + window.scrollX;
+    let top = rect.bottom + window.scrollY + 8;
+    
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (left + tooltipRect.width > window.innerWidth + window.scrollX) {
+      left = window.innerWidth + window.scrollX - tooltipRect.width - 10;
+    }
+    
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
     tooltip.classList.add('visible');
   }
 
   function hideTooltip() {
-    document.getElementById('note-tooltip').classList.remove('visible');
+    const tooltip = document.getElementById('note-tooltip');
+    if (tooltip) tooltip.classList.remove('visible');
   }
 
   function loadPageNotes() {
@@ -298,8 +333,184 @@
     }, response => {
       if (response && response.success) {
         pageNotes = response.notes;
+        setTimeout(() => {
+          restoreHighlights();
+        }, 500);
       }
     });
+  }
+
+  function restoreHighlights() {
+    if (pageNotes.length === 0) return;
+    
+    isRestoring = true;
+    
+    const textNotes = pageNotes.filter(note => note.text && note.text.trim().length > 0);
+    
+    textNotes.forEach(note => {
+      try {
+        highlightTextInDocument(note.text, note);
+      } catch (e) {
+        console.warn('恢复高亮失败:', note.text, e);
+      }
+    });
+    
+    isRestoring = false;
+  }
+
+  function highlightTextInDocument(searchText, note) {
+    if (!searchText || searchText.length < 2) return false;
+    
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function(node) {
+          if (!node.nodeValue || node.nodeValue.trim().length === 0) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (node.parentElement.closest('.note-highlight, #note-toolbar, #note-tooltip, #note-quick-add-modal, #note-modal-overlay, script, style, noscript')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+    
+    const textNodes = [];
+    let node;
+    while (node = walker.nextNode()) {
+      textNodes.push(node);
+    }
+    
+    for (const textNode of textNodes) {
+      const text = textNode.nodeValue;
+      const index = text.indexOf(searchText);
+      
+      if (index !== -1) {
+        try {
+          const range = document.createRange();
+          range.setStart(textNode, index);
+          range.setEnd(textNode, index + searchText.length);
+          
+          const span = document.createElement('span');
+          span.className = 'note-highlight ' + (note.color || 'yellow');
+          span.dataset.noteId = note.id;
+          span.dataset.text = searchText;
+          span.title = note.comment || '点击查看笔记';
+          
+          range.surroundContents(span);
+          return true;
+        } catch (e) {
+          console.warn('包裹文本失败:', e);
+        }
+      }
+    }
+    
+    return findAndHighlightAcrossNodes(searchText, note, textNodes);
+  }
+
+  function findAndHighlightAcrossNodes(searchText, note, textNodes) {
+    const searchChars = searchText.replace(/\s+/g, '');
+    if (searchChars.length < 3) return false;
+    
+    for (let i = 0; i < textNodes.length; i++) {
+      const combinedText = [];
+      const nodesToWrap = [];
+      let charCount = 0;
+      
+      for (let j = i; j < textNodes.length && charCount < searchChars.length + 20; j++) {
+        const nodeText = textNodes[j].nodeValue.replace(/\s+/g, '');
+        combinedText.push(nodeText);
+        nodesToWrap.push(textNodes[j]);
+        charCount += nodeText.length;
+      }
+      
+      const fullText = combinedText.join('');
+      const matchIndex = fullText.indexOf(searchChars);
+      
+      if (matchIndex !== -1 && nodesToWrap.length > 1) {
+        let remainingChars = matchIndex;
+        let startNode = null;
+        let startOffset = 0;
+        
+        for (const node of nodesToWrap) {
+          const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
+          if (remainingChars < nodeLen) {
+            startNode = node;
+            const originalText = node.nodeValue;
+            let nonSpaceCount = 0;
+            let offset = 0;
+            for (let k = 0; k < originalText.length; k++) {
+              if (originalText[k] !== ' ' && originalText[k] !== '\n' && originalText[k] !== '\t') {
+                if (nonSpaceCount >= remainingChars) {
+                  offset = k;
+                  break;
+                }
+                nonSpaceCount++;
+              }
+            }
+            startOffset = offset;
+            break;
+          }
+          remainingChars -= nodeLen;
+        }
+        
+        let endRemaining = matchIndex + searchChars.length;
+        let endNode = null;
+        let endOffset = 0;
+        
+        for (const node of nodesToWrap) {
+          const nodeLen = node.nodeValue.replace(/\s+/g, '').length;
+          if (endRemaining <= nodeLen) {
+            endNode = node;
+            const originalText = node.nodeValue;
+            let nonSpaceCount = 0;
+            let offset = 0;
+            for (let k = 0; k < originalText.length; k++) {
+              if (originalText[k] !== ' ' && originalText[k] !== '\n' && originalText[k] !== '\t') {
+                nonSpaceCount++;
+                if (nonSpaceCount >= endRemaining) {
+                  offset = k + 1;
+                  break;
+                }
+              }
+            }
+            endOffset = offset;
+            break;
+          }
+          endRemaining -= nodeLen;
+        }
+        
+        if (startNode && endNode) {
+          try {
+            const range = document.createRange();
+            range.setStart(startNode, startOffset);
+            range.setEnd(endNode, endOffset);
+            
+            const span = document.createElement('span');
+            span.className = 'note-highlight ' + (note.color || 'yellow');
+            span.dataset.noteId = note.id;
+            span.dataset.text = searchText;
+            span.title = note.comment || '点击查看笔记';
+            
+            range.surroundContents(span);
+            return true;
+          } catch (e) {
+            continue;
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   if (document.readyState === 'loading') {

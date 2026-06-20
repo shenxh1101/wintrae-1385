@@ -19,6 +19,7 @@ const SidePanelApp = {
     this.setupEventListeners();
     this.loadAllData();
     this.updatePageInfo();
+    this.checkOpenTab();
   },
 
   setupEventListeners() {
@@ -116,6 +117,15 @@ const SidePanelApp = {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]) {
         document.getElementById('current-page-title').textContent = tabs[0].title || '未知页面';
+      }
+    });
+  },
+
+  checkOpenTab() {
+    chrome.storage.local.get('openTab', (result) => {
+      if (result.openTab) {
+        this.switchTab(result.openTab);
+        chrome.storage.local.remove('openTab');
       }
     });
   },
@@ -334,15 +344,25 @@ const SidePanelApp = {
       return;
     }
 
-    listEl.innerHTML = this.state.courses.map(course => `
+    const courseNoteCounts = {};
+    this.state.notes.forEach(note => {
+      if (note.courseId) {
+        courseNoteCounts[note.courseId] = (courseNoteCounts[note.courseId] || 0) + 1;
+      }
+    });
+
+    listEl.innerHTML = this.state.courses.map(course => {
+      const count = courseNoteCounts[course.id] || 0;
+      return `
       <div class="course-card" data-course-id="${course.id}">
         <h3>${this.escapeHtml(course.title)}</h3>
         <div class="course-meta">
           <span>${this.formatDate(course.createdAt)}</span>
-          <span class="course-note-count">${course.noteCount || 0} 条笔记</span>
+          <span class="course-note-count">${count} 条笔记</span>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     listEl.querySelectorAll('.course-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -578,8 +598,11 @@ const SidePanelApp = {
 
     let notes = [...this.state.notes];
 
-    if (scope === 'current-course' && this.state.filters.courseId) {
-      notes = notes.filter(n => n.courseId === this.state.filters.courseId);
+    if (scope === 'current-course') {
+      const courseId = this.state.currentCourseId || this.state.filters.courseId;
+      if (courseId) {
+        notes = notes.filter(n => n.courseId === courseId);
+      }
     } else if (scope === 'current-page') {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
