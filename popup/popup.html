@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>课程笔记助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <div class="logo">
+        <span class="logo-icon">📚</span>
+        <span class="logo-text">课程笔记助手</span>
+      </div>
+    </header>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-number" id="stat-total">0</div>
+        <div class="stat-label">总笔记</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="stat-courses">0</div>
+        <div class="stat-label">课程数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="stat-review">0</div>
+        <div class="stat-label">待复习</div>
+      </div>
+    </div>
+
+    <div class="action-buttons">
+      <button class="action-btn primary" id="btn-open-sidepanel">
+        <span class="btn-icon">📝</span>
+        <span>打开侧边栏</span>
+      </button>
+    </div>
+
+    <div class="quick-links">
+      <div class="link-item" id="link-review">
+        <span class="link-icon">📖</span>
+        <span>待复习列表</span>
+        <span class="link-arrow">→</span>
+      </div>
+      <div class="link-item" id="link-courses">
+        <span class="link-icon">📂</span>
+        <span>课程目录</span>
+        <span class="link-arrow">→</span>
+      </div>
+      <div class="link-item" id="link-export">
+        <span class="link-icon">📤</span>
+        <span>导出笔记</span>
+        <span class="link-arrow">→</span>
+      </div>
+    </div>
+
+    <div class="recent-section">
+      <h3>最近笔记</h3>
+      <div class="recent-list" id="recent-list">
+        <div class="empty-text">暂无笔记</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
