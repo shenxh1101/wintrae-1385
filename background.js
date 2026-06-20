@@ -74,6 +74,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'updateNoteMastery':
       handleUpdateNoteMastery(message.noteId, message.mastered, sendResponse);
       return true;
+    case 'recordReview':
+      handleRecordReview(message.noteId, sendResponse);
+      return true;
     case 'updateNoteWrong':
       handleUpdateNoteWrong(message.noteId, message.isWrong, sendResponse);
       return true;
@@ -196,6 +199,15 @@ async function handleFindOrCreateCourse(url, title, sendResponse) {
 async function handleUpdateNoteMastery(noteId, mastered, sendResponse) {
   try {
     const note = await Storage.updateNoteMastery(noteId, mastered);
+    sendResponse({ success: true, note });
+  } catch (error) {
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+async function handleRecordReview(noteId, sendResponse) {
+  try {
+    const note = await Storage.recordReview(noteId);
     sendResponse({ success: true, note });
   } catch (error) {
     sendResponse({ success: false, error: error.message });

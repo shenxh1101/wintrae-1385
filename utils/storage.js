@@ -175,10 +175,20 @@ const Storage = {
     if (note) {
       note.mastered = mastered;
       note.updatedAt = Date.now();
-      if (mastered) {
-        note.reviewCount = (note.reviewCount || 0) + 1;
-        note.lastReviewTime = Date.now();
-      }
+      note.reviewCount = (note.reviewCount || 0) + 1;
+      note.lastReviewTime = Date.now();
+      await this.set(this.KEYS.NOTES, notes);
+    }
+    return note;
+  },
+
+  async recordReview(noteId) {
+    const notes = await this.getAllNotes();
+    const note = notes.find(n => n.id === noteId);
+    if (note) {
+      note.reviewCount = (note.reviewCount || 0) + 1;
+      note.lastReviewTime = Date.now();
+      note.updatedAt = Date.now();
       await this.set(this.KEYS.NOTES, notes);
     }
     return note;

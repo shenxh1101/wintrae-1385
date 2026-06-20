@@ -8,6 +8,11 @@ const SidePanelApp = {
     selectedNoteIds: [],
     reviewView: 'plan',
     selectedPlanDay: null,
+    wrongFilters: {
+      courseId: '',
+      difficulty: '',
+      reviewCount: ''
+    },
     filters: {
       courseId: '',
       tag: '',
@@ -86,6 +91,21 @@ const SidePanelApp = {
 
     document.getElementById('batch-postpone').addEventListener('click', () => {
       this.batchPostpone(1);
+    });
+
+    document.getElementById('wrong-filter-course').addEventListener('change', (e) => {
+      this.state.wrongFilters.courseId = e.target.value;
+      this.renderReviewList();
+    });
+
+    document.getElementById('wrong-filter-difficulty').addEventListener('change', (e) => {
+      this.state.wrongFilters.difficulty = e.target.value;
+      this.renderReviewList();
+    });
+
+    document.getElementById('wrong-filter-review').addEventListener('change', (e) => {
+      this.state.wrongFilters.reviewCount = e.target.value;
+      this.renderReviewList();
     });
   },
 
@@ -299,12 +319,17 @@ const SidePanelApp = {
     if (note.reviewReminder && note.reviewReminder > Date.now()) {
       const reminderStr = this.formatReminderTime(note.reviewReminder);
       reminderHTML = `<span class="note-reminder">⏰ ${reminderStr}</span>`;
+    } else if (note.reviewReminder && note.reviewReminder <= Date.now()) {
+      reminderHTML = `<span class="note-reminder" style="background:#ffebee;color:#c62828;">⏰ 已过期</span>`;
     }
 
     let reviewBadgeHTML = '';
     if (note.reviewCount && note.reviewCount > 0) {
       const hotClass = note.reviewCount >= 3 ? ' hot' : '';
       reviewBadgeHTML = `<span class="note-review-badge${hotClass}">复习${note.reviewCount}次</span>`;
+      if (note.lastReviewTime) {
+        reviewBadgeHTML += `<span style="font-size:10px;color:#999;margin-left:4px;">(${this.formatDate(note.lastReviewTime)})</span>`;
+      }
     }
 
     const checkboxHTML = options.showCheckbox ? `
@@ -312,6 +337,17 @@ const SidePanelApp = {
         <input type="checkbox" ${options.isSelected ? 'checked' : ''}>
       </label>
     ` : '';
+
+    let reviewActionsHTML = '';
+    if (options.showReviewActions) {
+      reviewActionsHTML = `
+        <div class="review-actions">
+          <button class="review-action-btn still-wrong" data-action="still-wrong">仍不会</button>
+          <button class="review-action-btn mastered" data-action="mastered">已掌握</button>
+          ${note.isWrong ? '<button class="review-action-btn remove-wrong" data-action="remove-wrong">移出错题</button>' : ''}
+        </div>
+      `;
+    }
 
     return `
       <div class="note-card ${note.mastered ? 'mastered' : ''} ${note.isWrong ? 'wrong' : ''}" data-note-id="${note.id}" style="position: relative;">
@@ -332,6 +368,7 @@ const SidePanelApp = {
             <button class="action-btn delete">删除</button>
           </div>
         </div>
+        ${reviewActionsHTML}
       </div>
     `;
   },
@@ -340,13 +377,17 @@ const SidePanelApp = {
     const planEl = document.getElementById('review-plan');
     const listEl = document.getElementById('review-list');
     const batchActionsEl = document.getElementById('review-batch-actions');
+    const wrongFiltersEl = document.getElementById('wrong-filters');
     const view = this.state.reviewView;
+
+    wrongFiltersEl.style.display = view === 'wrong' ? 'flex' : 'none';
 
     if (view === 'plan') {
       this.renderReviewPlan(planEl, listEl, batchActionsEl);
     } else if (view === 'wrong') {
       this.renderWrongReview(planEl, listEl, batchActionsEl);
     } else {
+      planEl.innerHTML = '';
       this.renderReviewListView(planEl, listEl, batchActionsEl);
     }
   },
@@ -389,20 +430,7 @@ const SidePanelApp = {
       `;
     }
 
-    const todayKey = todayStart.getFullYear() + '-' +
-      String(todayStart.getMonth() + 1).padStart(2, '0') + '-' +
-      String(todayStart.getDate()).padStart(2, '0');
-    
-    const todayNotes = dayMap[todayKey] || [];
-    planHTML += `
-      <div class="plan-day today ${this.state.selectedPlanDay === todayKey ? 'selected' : ''}" data-day="${todayKey}">
-        <span class="plan-day-label">今天</span>
-        <span class="plan-day-date">${now.getMonth() + 1}/${now.getDate()}</span>
-        <span class="plan-day-count">${todayNotes.length} 条</span>
-      </div>
-    `;
-
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 0; i <= 6; i++) {
       const d = new Date(todayStart);
       d.setDate(d.getDate() + i);
       const dayKey = d.getFullYear() + '-' +
@@ -411,10 +439,14 @@ const SidePanelApp = {
       const dayNotes = dayMap[dayKey] || [];
       const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
       const weekday = weekdays[d.getDay()];
+      const isToday = i === 0;
+      const label = isToday ? '今天' : weekday;
+      const dayClass = isToday ? 'today' : 'future';
+      const emptyClass = dayNotes.length === 0 ? ' empty' : '';
       
       planHTML += `
-        <div class="plan-day future ${this.state.selectedPlanDay === dayKey ? 'selected' : ''}" data-day="${dayKey}">
-          <span class="plan-day-label">${weekday}</span>
+        <div class="plan-day ${dayClass}${emptyClass} ${this.state.selectedPlanDay === dayKey ? 'selected' : ''}" data-day="${dayKey}">
+          <span class="plan-day-label">${label}</span>
           <span class="plan-day-date">${d.getMonth() + 1}/${d.getDate()}</span>
           <span class="plan-day-count">${dayNotes.length} 条</span>
         </div>
@@ -443,14 +475,23 @@ const SidePanelApp = {
 
     let filteredNotes;
     if (this.state.selectedPlanDay === 'overdue') {
-      filteredNotes = overdueNotes;
+      filteredNotes = [...overdueNotes];
     } else if (this.state.selectedPlanDay === 'noReminder') {
-      filteredNotes = noReminderNotes;
+      filteredNotes = [...noReminderNotes];
     } else if (this.state.selectedPlanDay) {
-      filteredNotes = dayMap[this.state.selectedPlanDay] || [];
+      filteredNotes = [...(dayMap[this.state.selectedPlanDay] || [])];
     } else {
-      filteredNotes = unmasteredNotes;
+      filteredNotes = [...unmasteredNotes];
     }
+
+    filteredNotes.sort((a, b) => {
+      const aCount = a.reviewCount || 0;
+      const bCount = b.reviewCount || 0;
+      if (bCount !== aCount) return bCount - aCount;
+      const aRem = a.reviewReminder || 0;
+      const bRem = b.reviewReminder || 0;
+      return aRem - bRem;
+    });
 
     if (filteredNotes.length === 0) {
       batchActionsEl.style.display = 'none';
@@ -464,16 +505,54 @@ const SidePanelApp = {
     document.getElementById('select-all-notes').checked = allSelected;
 
     listEl.innerHTML = filteredNotes.map(note => 
-      this.createNoteCardHTML(note, { showCheckbox: true, isSelected: this.state.selectedNoteIds.includes(note.id) })
+      this.createNoteCardHTML(note, { 
+        showCheckbox: true, 
+        isSelected: this.state.selectedNoteIds.includes(note.id),
+        showReviewActions: true
+      })
     ).join('');
 
     this.bindNoteCardEvents(listEl);
   },
 
   renderWrongReview(planEl, listEl, batchActionsEl) {
-    const wrongNotes = this.state.notes.filter(n => n.isWrong);
-    
+    const wrongFiltersEl = document.getElementById('wrong-filters');
     planEl.innerHTML = '';
+    wrongFiltersEl.style.display = 'flex';
+    
+    const courseSelect = document.getElementById('wrong-filter-course');
+    if (courseSelect.options.length <= 1) {
+      this.state.courses.forEach(course => {
+        const option = document.createElement('option');
+        option.value = course.id;
+        option.textContent = course.title;
+        courseSelect.appendChild(option);
+      });
+    }
+    courseSelect.value = this.state.wrongFilters.courseId;
+    
+    document.getElementById('wrong-filter-difficulty').value = this.state.wrongFilters.difficulty;
+    document.getElementById('wrong-filter-review').value = this.state.wrongFilters.reviewCount;
+    
+    let wrongNotes = this.state.notes.filter(n => n.isWrong);
+    
+    if (this.state.wrongFilters.courseId) {
+      wrongNotes = wrongNotes.filter(n => n.courseId === this.state.wrongFilters.courseId);
+    }
+    if (this.state.wrongFilters.difficulty) {
+      wrongNotes = wrongNotes.filter(n => n.difficulty === this.state.wrongFilters.difficulty);
+    }
+    if (this.state.wrongFilters.reviewCount) {
+      const minCount = parseInt(this.state.wrongFilters.reviewCount, 10);
+      wrongNotes = wrongNotes.filter(n => (n.reviewCount || 0) >= minCount);
+    }
+    
+    wrongNotes.sort((a, b) => {
+      const aCount = a.reviewCount || 0;
+      const bCount = b.reviewCount || 0;
+      if (bCount !== aCount) return bCount - aCount;
+      return b.createdAt - a.createdAt;
+    });
     
     if (wrongNotes.length === 0) {
       batchActionsEl.style.display = 'none';
@@ -507,7 +586,7 @@ const SidePanelApp = {
             <span class="review-group-count">${unmasteredWrong.length} 条</span>
           </div>
           <div class="review-group-notes">
-            ${unmasteredWrong.map(note => this.createNoteCardHTML(note)).join('')}
+            ${unmasteredWrong.map(note => this.createNoteCardHTML(note, { showReviewActions: true })).join('')}
           </div>
         </div>
       `;
@@ -521,7 +600,7 @@ const SidePanelApp = {
             <span class="review-group-count">${masteredWrong.length} 条</span>
           </div>
           <div class="review-group-notes">
-            ${masteredWrong.map(note => this.createNoteCardHTML(note)).join('')}
+            ${masteredWrong.map(note => this.createNoteCardHTML(note, { showReviewActions: true })).join('')}
           </div>
         </div>
       `;
@@ -610,10 +689,39 @@ const SidePanelApp = {
         this.toggleWrong(noteId);
       });
       
+      card.querySelectorAll('.review-action-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const action = btn.dataset.action;
+          this.handleReviewAction(noteId, action);
+        });
+      });
+      
       card.addEventListener('click', () => {
         this.openNotePage(noteId);
       });
     });
+  },
+
+  handleReviewAction(noteId, action) {
+    const note = this.state.notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    if (action === 'still-wrong') {
+      chrome.runtime.sendMessage({
+        action: 'recordReview',
+        noteId
+      }, (response) => {
+        if (response && response.success) {
+          this.showToast('已记录复习，加油！', 'info');
+          this.loadAllData();
+        }
+      });
+    } else if (action === 'mastered') {
+      this.toggleMastered(noteId, true);
+    } else if (action === 'remove-wrong') {
+      this.toggleWrong(noteId);
+    }
   },
 
   groupNotesByReminder(notes) {
@@ -1253,66 +1361,122 @@ const SidePanelApp = {
 
   exportReport(notes) {
     const now = new Date();
+    const now2 = Date.now();
     const totalNotes = notes.length;
     const masteredNotes = notes.filter(n => n.mastered).length;
-    const wrongNotes = notes.filter(n => n.isWrong).length;
     const unmasteredNotes = notes.filter(n => !n.mastered).length;
+    const wrongNotes = notes.filter(n => n.isWrong).length;
     const hotReviewNotes = notes.filter(n => (n.reviewCount || 0) >= 3).length;
-    
-    const now2 = Date.now();
     const overdueReminders = notes.filter(n => n.reviewReminder && n.reviewReminder < now2 && !n.mastered).length;
     const upcomingReminders = notes.filter(n => n.reviewReminder && n.reviewReminder >= now2 && !n.mastered).length;
     
     let md = '# 复习报告\n\n';
     md += `生成时间：${now.toLocaleString('zh-CN')}\n\n`;
     
-    md += '## 总体概况\n\n';
+    md += '## 📊 总体概况\n\n';
     md += `| 指标 | 数值 |\n`;
     md += `|------|------|\n`;
     md += `| 总笔记数 | ${totalNotes} |\n`;
     md += `| 已掌握 | ${masteredNotes} (${totalNotes ? Math.round(masteredNotes / totalNotes * 100) : 0}%) |\n`;
     md += `| 未掌握 | ${unmasteredNotes} |\n`;
     md += `| 错题数 | ${wrongNotes} |\n`;
-    md += `| 反复未掌握(复习≥3次) | ${hotReviewNotes} |\n`;
+    md += `| 反复未掌握(≥3次) | ${hotReviewNotes} |\n`;
     md += `| 已过期提醒 | ${overdueReminders} |\n`;
     md += `| 待复习提醒 | ${upcomingReminders} |\n\n`;
     
-    md += '## 掌握状态分布\n\n';
+    md += '### 掌握进度\n\n';
     md += '```\n';
     if (totalNotes > 0) {
-      const masteredBar = '█'.repeat(Math.round(masteredNotes / totalNotes * 20));
-      const unmasteredBar = '░'.repeat(20 - masteredBar.length);
-      md += `已掌握 [${masteredBar}${unmasteredBar}] ${Math.round(masteredNotes / totalNotes * 100)}%\n`;
+      const pct = Math.round(masteredNotes / totalNotes * 100);
+      const barLen = 25;
+      const filled = Math.round(masteredNotes / totalNotes * barLen);
+      const masteredBar = '█'.repeat(filled);
+      const unmasteredBar = '░'.repeat(barLen - filled);
+      md += `已掌握 [${masteredBar}${unmasteredBar}] ${pct}% (${masteredNotes}/${totalNotes})\n`;
     }
+    md += '```\n\n';
+    
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const weekLater = new Date(todayStart);
+    weekLater.setDate(weekLater.getDate() + 7);
+    
+    md += '### 近7天复习计划\n\n';
+    const dayMap = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(todayStart);
+      d.setDate(d.getDate() + i);
+      const key = d.toISOString().split('T')[0];
+      dayMap[key] = { count: 0, date: d };
+    }
+    
+    const overdueCount = notes.filter(n => n.reviewReminder && n.reviewReminder < todayStart.getTime() && !n.mastered).length;
+    
+    notes.forEach(note => {
+      if (!note.reviewReminder || note.mastered) return;
+      const d = new Date(note.reviewReminder);
+      if (d < todayStart) return;
+      const key = d.toISOString().split('T')[0];
+      if (dayMap[key]) {
+        dayMap[key].count++;
+      }
+    });
+    
+    md += '```\n';
+    if (overdueCount > 0) {
+      md += `  已过期  ${'█'.repeat(Math.min(overdueCount, 20))} ${overdueCount}条 (紧急)\n`;
+    }
+    const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+    let maxCount = Math.max(...Object.values(dayMap).map(d => d.count), 1);
+    Object.keys(dayMap).sort().forEach((key, i) => {
+      const info = dayMap[key];
+      const d = info.date;
+      const label = i === 0 ? '今天' : `周${weekdays[d.getDay()]}`;
+      const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+      const barLen = Math.max(1, Math.round(info.count / maxCount * 20));
+      const bar = info.count > 0 ? '▌'.repeat(barLen) : '·';
+      md += `  ${label.padEnd(4)} ${dateStr.padEnd(5)} ${bar} ${info.count}条\n`;
+    });
     md += '```\n\n';
     
     const wrongNotesList = notes.filter(n => n.isWrong);
     if (wrongNotesList.length > 0) {
-      md += '## ❌ 错题列表\n\n';
+      md += '## ❌ 错题清单\n\n';
+      md += `共 ${wrongNotesList.length} 道错题，其中未掌握 ${wrongNotesList.filter(n => !n.mastered).length} 道。\n\n`;
+      wrongNotesList.sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
       wrongNotesList.forEach((note, i) => {
+        const course = this.state.courses.find(c => c.id === note.courseId);
         md += `### ${i + 1}. ${note.text ? note.text.substring(0, 60) : '无内容'}\n\n`;
-        if (note.comment) md += `备注：${note.comment}\n\n`;
-        md += `- 掌握状态：${note.mastered ? '✅ 已掌握' : '❌ 未掌握'}\n`;
-        md += `- 复习次数：${note.reviewCount || 0}\n`;
-        if (note.lastReviewTime) md += `- 最近复习：${new Date(note.lastReviewTime).toLocaleString('zh-CN')}\n`;
+        if (note.comment) md += `> ${note.comment}\n\n`;
+        md += `- **课程**：${course ? course.title : '未分类'}\n`;
+        md += `- **状态**：${note.mastered ? '✅ 已掌握' : '❌ 未掌握'}\n`;
+        md += `- **复习次数**：${note.reviewCount || 0} 次\n`;
+        if (note.lastReviewTime) md += `- **最近复习**：${new Date(note.lastReviewTime).toLocaleString('zh-CN')}\n`;
         if (note.difficulty) {
           const diffText = { easy: '简单', medium: '中等', hard: '困难' }[note.difficulty];
-          md += `- 难度：${diffText}\n`;
+          md += `- **难度**：${diffText}\n`;
         }
-        if (note.url) md += `- 来源：${note.url}\n`;
+        if (note.reviewReminder) {
+          const isOverdue = note.reviewReminder < now2;
+          md += `- **提醒时间**：${new Date(note.reviewReminder).toLocaleString('zh-CN')} ${isOverdue ? '⚠️ 已过期' : ''}\n`;
+        }
+        if (note.tags && note.tags.length > 0) md += `- **标签**：${note.tags.join(', ')}\n`;
+        if (note.url) md += `- **来源**：${note.url}\n`;
         md += '\n';
       });
     }
     
-    const hotNotes = notes.filter(n => (n.reviewCount || 0) >= 3);
+    const hotNotes = notes.filter(n => (n.reviewCount || 0) >= 3 && !n.mastered);
     if (hotNotes.length > 0) {
       md += '## 🔥 反复未掌握内容\n\n';
-      md += '以下内容已复习 3 次以上仍未掌握，建议重点关注：\n\n';
+      md += `以下内容已复习 3 次以上仍未掌握，建议重点突破：\n\n`;
       hotNotes.sort((a, b) => (b.reviewCount || 0) - (a.reviewCount || 0));
       hotNotes.forEach((note, i) => {
-        md += `${i + 1}. **${note.text ? note.text.substring(0, 60) : '无内容'}** — 复习${note.reviewCount}次`;
+        const course = this.state.courses.find(c => c.id === note.courseId);
+        md += `${i + 1}. **${note.text ? note.text.substring(0, 50) : '无内容'}**\n`;
+        md += `   - 复习 ${note.reviewCount} 次 | ${course ? course.title : '未分类'}`;
         if (note.difficulty) {
-          const diffText = { easy: '简单', medium: '中等', hard: '困难' }[note.difficulty];
+          const diffText = { easy: '简', medium: '中', hard: '难' }[note.difficulty];
           md += ` | 难度：${diffText}`;
         }
         md += '\n';
@@ -1321,27 +1485,46 @@ const SidePanelApp = {
     }
     
     const courses = this.groupNotesByCourse(notes);
-    md += '## 按课程分组详情\n\n';
+    md += '## 📚 按课程汇总\n\n';
+    
     courses.forEach(course => {
       const courseMastered = course.notes.filter(n => n.mastered).length;
       const courseTotal = course.notes.length;
-      md += `### ${course.title}\n\n`;
-      md += `掌握进度：${courseMastered}/${courseTotal}`;
-      if (courseTotal > 0) md += ` (${Math.round(courseMastered / courseTotal * 100)}%)`;
-      md += '\n\n';
+      const courseWrong = course.notes.filter(n => n.isWrong).length;
+      const courseOverdue = course.notes.filter(n => n.reviewReminder && n.reviewReminder < now2 && !n.mastered).length;
+      const courseHot = course.notes.filter(n => (n.reviewCount || 0) >= 3 && !n.mastered).length;
+      const coursePct = courseTotal > 0 ? Math.round(courseMastered / courseTotal * 100) : 0;
+      const barLen = 15;
+      const filled = Math.round(courseMastered / Math.max(courseTotal, 1) * barLen);
+      const bar = '█'.repeat(filled) + '░'.repeat(barLen - filled);
       
+      md += `### ${course.title}\n\n`;
+      md += `| 指标 | 数值 |\n`;
+      md += `|------|------|\n`;
+      md += `| 笔记总数 | ${courseTotal} |\n`;
+      md += `| 已掌握 | ${courseMastered} (${coursePct}%) |\n`;
+      md += `| 错题数 | ${courseWrong} |\n`;
+      md += `| 过期提醒 | ${courseOverdue} |\n`;
+      md += `| 反复未掌握 | ${courseHot} |\n\n`;
+      md += `掌握进度：\`${bar}\` ${coursePct}%\n\n`;
+      
+      md += '<details>\n';
+      md += '<summary>查看详情</summary>\n\n';
       md += '| 内容 | 掌握 | 错题 | 复习次数 | 提醒时间 | 难度 |\n';
       md += '|------|------|------|----------|----------|------|\n';
       course.notes.forEach(note => {
-        const text = (note.text || note.comment || '无内容').substring(0, 30).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+        const text = (note.text || note.comment || '无内容').substring(0, 25).replace(/\|/g, '\\|').replace(/\n/g, ' ');
         const mastered = note.mastered ? '✅' : '❌';
         const wrong = note.isWrong ? '❌' : '-';
         const count = note.reviewCount || 0;
-        const reminder = note.reviewReminder ? (note.reviewReminder < now2 ? '已过期' : new Date(note.reviewReminder).toLocaleDateString('zh-CN')) : '-';
+        let reminder = '-';
+        if (note.reviewReminder) {
+          reminder = note.reviewReminder < now2 ? '⚠️ 已过期' : new Date(note.reviewReminder).toLocaleDateString('zh-CN');
+        }
         const diff = note.difficulty ? { easy: '简', medium: '中', hard: '难' }[note.difficulty] : '-';
         md += `| ${text} | ${mastered} | ${wrong} | ${count} | ${reminder} | ${diff} |\n`;
       });
-      md += '\n';
+      md += '\n</details>\n\n';
     });
     
     return md;
